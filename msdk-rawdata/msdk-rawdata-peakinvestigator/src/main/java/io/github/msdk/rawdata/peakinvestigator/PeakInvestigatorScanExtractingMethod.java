@@ -1,0 +1,174 @@
+/* 
+ * (C) Copyright 2015-2016 by MSDK Development Team
+ *
+ * This software is dual-licensed under either
+ *
+ * (a) the terms of the GNU Lesser General Public License version 2.1
+ * as published by the Free Software Foundation
+ *
+ * or (per the licensee's choosing)
+ *
+ * (b) the terms of the Eclipse Public License v1.0 as published by
+ * the Eclipse Foundation.
+ */
+
+package io.github.msdk.rawdata.peakinvestigator;
+
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.StringTokenizer;
+import java.util.TreeMap;
+
+import javax.annotation.Nonnull;
+
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
+import org.apache.commons.io.IOUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import io.github.msdk.MSDKException;
+import io.github.msdk.MSDKMethod;
+import io.github.msdk.datamodel.impl.MSDKObjectBuilder;
+import io.github.msdk.datamodel.msspectra.MsSpectrum;
+import io.github.msdk.datamodel.msspectra.MsSpectrumType;
+import io.github.msdk.util.ArrayUtil;
+
+/**
+ * This class extracts scans from the results returned from PeakInvestigator.
+ * Internally, it returns a
+ * {@link io.github.msdk.datamodel.impl.SimpleMsSpectrum} object if no error
+ * bars are present. Otherwise, it returns a
+ * {@link io.github.msdk.rawdata.peakinvestigator.PeakInvestigatorMsSpectrum},
+ * which decorates a SimpleMsSpectrum.
+ */
+public class PeakInvestigatorScanExtractingMethod implements MSDKMethod<List<MsSpectrum>> {
+
+	private final Logger logger = LoggerFactory.getLogger(this.getClass());
+
+	private final @Nonnull File file;
+
+	private List<MsSpectrum> result;
+
+	private int processedScans = 0, totalScans = 0;
+	private boolean canceled = false;
+
+	PeakInvestigatorScanExtractingMethod(@Nonnull File file) {
+		this.file = file;
+	}
+
+	PeakInvestigatorScanExtractingMethod(@Nonnull String filename) {
+		this.file = new File(filename);
+	}
+
+	/** {@inheritDoc} */
+	@Override
+	public Float getFinishedPercentage() {
+		if (totalScans == 0) {
+			return null;
+		} else {
+			return (float) processedScans / totalScans;
+		}
+	}
+
+	/** {@inheritDoc} */
+	@Override
+	public List<MsSpectrum> execute() throws MSDKException {
+		logger.info("Started extracting scans from file {}.", file);
+
+		result = new ArrayList<>();
+
+		try (TarArchiveInputStream stream = new TarArchiveInputStream(
+				new GzipCompressorInputStream(new FileInputStream(file)))) {
+
+			TarArchiveEntry entry;
+			while ((entry = stream.getNextTarEntry()) != null) {
+
+				if (canceled) {
+					return null;
+				}
+
+				byte[] bytes = IOUtils.readFully(stream, (int) entry.getSize());
+
+				BufferedReader reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes)));
+				MsSpectrum spectrum = parseMsSpectrum(reader);
+				if (spectrum != null) {
+					result.add(spectrum);
+				}
+
+			}
+
+		} catch (FileNotFoundException e) {
+			throw new MSDKException(e);
+		} catch (IOException e) {
+			throw new MSDKException(e);
+		}
+		logger.info("Finished extracting scans from file {}.", file);
+		return result;
+	}
+
+	/** {@inheritDoc} */
+	@Override
+	public List<MsSpectrum> getResult() {
+		return result;
+	}
+
+	/** {@inheritDoc} */
+	@Override
+	public void cancel() {
+		this.canceled = true;
+	}
+
+	protected MsSpectrum parseMsSpectrum(BufferedReader reader) throws IOException {
+		String line;
+		double[] masses = new double[1024];
+		float[] intensities = new float[1024];
+		TreeMap<Double, PeakInvestigatorMsSpectrum.Error> errors = new TreeMap<>();
+
+		int size = 0;
+		while ((line = reader.readLine()) != null) {
+			if (line.startsWith("#")) {
+				continue;
+			}
+
+			StringTokenizer tokenizer = new StringTokenizer(line);
+
+			double mass = Double.parseDouble(tokenizer.nextToken());
+			masses = ArrayUtil.addToArray(masses, mass, size);
+
+			float intenisty = Float.parseFloat(tokenizer.nextToken());
+			intensities = ArrayUtil.addToArray(intensities, intenisty, size);
+
+			// assume we are either two columns or five columns
+			if (tokenizer.hasMoreTokens()) {
+				double mzError = Double.parseDouble(tokenizer.nextToken());
+				float intensityError = Float.parseFloat(tokenizer.nextToken());
+				double minError = Double.parseDouble(tokenizer.nextToken());
+
+				errors.put(mass, new PeakInvestigatorMsSpectrum.Error(mzError, intensityError, minError));
+			}
+
+			size++;
+		}
+
+		if (size == 0) {
+			return null;
+		}
+
+		MsSpectrum result = MSDKObjectBuilder.getMsSpectrum(masses, intensities, size, MsSpectrumType.CENTROIDED);
+		if (errors.size() == size) {
+			result = new PeakInvestigatorMsSpectrum(result, errors);
+		}
+
+		return result;
+	}
+
+}
