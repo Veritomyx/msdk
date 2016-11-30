@@ -33,6 +33,9 @@ import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
+
 import io.github.msdk.MSDKException;
 import io.github.msdk.MSDKMethod;
 
@@ -52,9 +55,11 @@ public class PeakInvestigatorScanBundlingMethod implements MSDKMethod<File> {
 	private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
 	private final @Nonnull File file;
+	private final Predicate<MsScan> predicate;
+	private final RawDataFile rawDataFile;
 
 	private int processedScans = 0, totalScans = 0;
-	private RawDataFile rawDataFile;
+	private int numScans = 0;
 	private boolean canceled = false;
 
 	/**
@@ -71,6 +76,29 @@ public class PeakInvestigatorScanBundlingMethod implements MSDKMethod<File> {
 		this.rawDataFile = rawDataFile;
 		this.file = File.createTempFile("PI-", ".tar");
 		this.file.deleteOnExit();
+		this.predicate = Predicates.alwaysTrue();
+	}
+
+	/**
+	 * <p>
+	 * Constructor for PeakInvestigatorScanBundlingMethod. A temporary file is
+	 * created, which will be deleted on JVM exit.
+	 * </p>
+	 *
+	 * @param rawDataFile
+	 *            a {@link io.github.msdk.datamodel.rawdata.RawDataFile} object.
+	 * @param predicate
+	 *            a predicate indicating which scans should be bundled.
+	 * @throws IOException
+	 *             If temporary file cannot be created.
+	 */
+	public PeakInvestigatorScanBundlingMethod(@Nonnull RawDataFile rawDataFile, @Nonnull Predicate<MsScan> predicate)
+			throws IOException {
+
+		this.rawDataFile = rawDataFile;
+		this.file = File.createTempFile("PI-", ".tar");
+		this.file.deleteOnExit();
+		this.predicate = predicate;
 	}
 
 	/**
@@ -86,6 +114,27 @@ public class PeakInvestigatorScanBundlingMethod implements MSDKMethod<File> {
 	public PeakInvestigatorScanBundlingMethod(@Nonnull RawDataFile rawDataFile, @Nonnull File file) {
 		this.rawDataFile = rawDataFile;
 		this.file = file;
+		this.predicate = Predicates.alwaysTrue();
+	}
+
+	/**
+	 * <p>
+	 * Constructor for PeakInvestigatorScanBundlingMethod.
+	 * </p>
+	 *
+	 * @param rawDataFile
+	 *            a {@link io.github.msdk.datamodel.rawdata.RawDataFile} object.
+	 * @param file
+	 *            a {@link java.io.File} object.
+	 * @param predicate
+	 *            a predicate indicating which scans should be bundled.
+	 */
+	public PeakInvestigatorScanBundlingMethod(@Nonnull RawDataFile rawDataFile, @Nonnull File file,
+			@Nonnull Predicate<MsScan> predicate) {
+
+		this.rawDataFile = rawDataFile;
+		this.file = file;
+		this.predicate = predicate;
 	}
 
 	/** {@inheritDoc} */
@@ -115,6 +164,11 @@ public class PeakInvestigatorScanBundlingMethod implements MSDKMethod<File> {
 				if (canceled)
 					return null;
 
+				if (!predicate.apply(scan)) {
+					processedScans++;
+					continue;
+				}
+
 				byte[] bytes = scanToBytes(scan);
 
 				TarArchiveEntry entry = new TarArchiveEntry(String.format("scan%05d.txt", scan.getScanNumber()));
@@ -129,6 +183,7 @@ public class PeakInvestigatorScanBundlingMethod implements MSDKMethod<File> {
 
 				tar.closeArchiveEntry();
 				processedScans++;
+				numScans++;
 			}
 
 		} catch (FileNotFoundException e) {
@@ -151,6 +206,11 @@ public class PeakInvestigatorScanBundlingMethod implements MSDKMethod<File> {
 	@Override
 	public void cancel() {
 		this.canceled = true;
+	}
+
+	/** Get number of scans actually saved to file. */
+	public int getNumScans() {
+		return numScans;
 	}
 
 	/**

@@ -22,6 +22,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import com.google.common.base.Predicate;
+
 import io.github.msdk.MSDKException;
 import io.github.msdk.datamodel.rawdata.MsScan;
 import io.github.msdk.datamodel.rawdata.RawDataFile;
@@ -51,6 +53,7 @@ public class PeakInvestigatorScanBundlingMethodTest {
 		File file = method.execute();
 
 		assertThat(method.getFinishedPercentage(), equalTo(1.0f));
+		assertThat(method.getNumScans(), equalTo(1));
 
 		try (GzipCompressorInputStream stream = new GzipCompressorInputStream(new FileInputStream(file))) {
 			TarArchiveEntry entry = getEntryFromStream(stream);
@@ -79,6 +82,7 @@ public class PeakInvestigatorScanBundlingMethodTest {
 		File file = method.execute();
 
 		assertThat(method.getFinishedPercentage(), equalTo(1.0f));
+		assertThat(method.getNumScans(), equalTo(2));
 
 		try (GzipCompressorInputStream stream = new GzipCompressorInputStream(new FileInputStream(file))) {
 			TarArchiveEntry entry = getEntryFromStream(stream);
@@ -103,6 +107,50 @@ public class PeakInvestigatorScanBundlingMethodTest {
 			reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes)));
 			assertThat(reader.readLine(), equalTo("3.0\t30.0"));
 			assertThat(reader.readLine(), equalTo("4.0\t40.0"));
+		}
+
+	}
+
+	@Test
+	public void testExecuteTwoScansWithPredicate() throws IOException, MSDKException {
+		List<MsScan> scans = new LinkedList<>();
+		scans.add(mockScan(0, mzValues1, intensityValues1));
+		scans.add(mockScan(12, mzValues2, intensityValues2));
+
+		RawDataFile rawDataFile = mockRawDataFile("TwoScans.raw", scans);
+		Predicate<MsScan> predicate = new Predicate<MsScan>() {
+			@Override
+			public boolean apply(MsScan input) {
+				if (input.getScanNumber() == 0) {
+					return true;
+				}
+				return false;
+			}
+		};
+
+		PeakInvestigatorScanBundlingMethod method = new PeakInvestigatorScanBundlingMethod(rawDataFile,
+				folder.newFile(), predicate);
+		File file = method.execute();
+
+		assertThat(method.getFinishedPercentage(), equalTo(1.0f));
+		assertThat(method.getNumScans(), equalTo(1));
+
+		try (GzipCompressorInputStream stream = new GzipCompressorInputStream(new FileInputStream(file))) {
+			TarArchiveEntry entry = getEntryFromStream(stream);
+			assertThat(entry.getName(), equalTo("scan00000.txt"));
+
+			int size = (int) entry.getSize();
+			byte[] bytes = new byte[size];
+			assertThat(stream.read(bytes), equalTo(size));
+
+			BufferedReader reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes)));
+			assertThat(reader.readLine(), equalTo("1.0\t10.0"));
+			assertThat(reader.readLine(), equalTo("2.0\t20.0"));
+
+			stream.skip(HEADER_SIZE - size % HEADER_SIZE);
+			entry = getEntryFromStream(stream);
+			assertThat(entry.getName(), equalTo(""));
+			assertThat(entry.getSize(), equalTo(0l));
 		}
 
 	}
