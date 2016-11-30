@@ -20,7 +20,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.StringTokenizer;
@@ -58,7 +60,7 @@ public class PeakInvestigatorScanExtractingMethod implements MSDKMethod<List<MsS
 
 	private List<MsSpectrum> result;
 
-	private int processedScans = 0, totalScans = 0;
+	private long totalBytes = 0, processedBytes = 0;
 	private boolean canceled = false;
 
 	PeakInvestigatorScanExtractingMethod(@Nonnull File file) {
@@ -72,10 +74,10 @@ public class PeakInvestigatorScanExtractingMethod implements MSDKMethod<List<MsS
 	/** {@inheritDoc} */
 	@Override
 	public Float getFinishedPercentage() {
-		if (totalScans == 0) {
+		if (totalBytes == 0) {
 			return null;
 		} else {
-			return (float) processedScans / totalScans;
+			return ((float) processedBytes) / totalBytes;
 		}
 	}
 
@@ -83,20 +85,25 @@ public class PeakInvestigatorScanExtractingMethod implements MSDKMethod<List<MsS
 	@Override
 	public List<MsSpectrum> execute() throws MSDKException {
 		logger.info("Started extracting scans from file {}.", file);
+		try {
+			totalBytes = Files.size(file.toPath());
+		} catch (IOException e) {
+			throw new MSDKException(e);
+		}
 
 		result = new ArrayList<>();
 
-		try (TarArchiveInputStream stream = new TarArchiveInputStream(
-				new GzipCompressorInputStream(new FileInputStream(file)))) {
+		try (BytesReadInputStream stream = new BytesReadInputStream(new FileInputStream(file));
+				TarArchiveInputStream tar = new TarArchiveInputStream(new GzipCompressorInputStream(stream))) {
 
 			TarArchiveEntry entry;
-			while ((entry = stream.getNextTarEntry()) != null) {
+			while ((entry = tar.getNextTarEntry()) != null) {
 
 				if (canceled) {
 					return null;
 				}
 
-				byte[] bytes = IOUtils.readFully(stream, (int) entry.getSize());
+				byte[] bytes = IOUtils.readFully(tar, (int) entry.getSize());
 
 				BufferedReader reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(bytes)));
 				MsSpectrum spectrum = parseMsSpectrum(reader);
@@ -104,6 +111,7 @@ public class PeakInvestigatorScanExtractingMethod implements MSDKMethod<List<MsS
 					result.add(spectrum);
 				}
 
+				processedBytes = stream.getBytesRead();
 			}
 
 		} catch (FileNotFoundException e) {
@@ -171,4 +179,44 @@ public class PeakInvestigatorScanExtractingMethod implements MSDKMethod<List<MsS
 		return result;
 	}
 
+	private class BytesReadInputStream extends InputStream {
+
+		private final InputStream stream;
+		private long bytesRead = 0;
+
+		public BytesReadInputStream(InputStream stream) {
+			this.stream = stream;
+		}
+
+		@Override
+		public int read() throws IOException {
+			int value = stream.read();
+			if (value >= 0) {
+				bytesRead++;
+			}
+			return value;
+		}
+
+		@Override
+		public int read(byte[] bytes) throws IOException {
+			int count = stream.read(bytes);
+			if (count > 0) {
+				bytesRead += count;
+			}
+			return count;
+		}
+
+		@Override
+		public int read(byte[] bytes, int offset, int length) throws IOException {
+			int count = stream.read(bytes, offset, length);
+			if (count > 0) {
+				bytesRead += count;
+			}
+			return count;
+		}
+
+		public long getBytesRead() {
+			return bytesRead;
+		}
+	}
 }

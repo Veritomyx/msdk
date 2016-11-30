@@ -38,6 +38,7 @@ public class PeakInvestigatorScanExtractingMethodTest {
 		PeakInvestigatorScanExtractingMethod method = new PeakInvestigatorScanExtractingMethod(
 				BASE_TEST_PATH + "one_scan.tar");
 		List<MsSpectrum> spectra = method.execute();
+		assertThat(method.getFinishedPercentage(), equalTo(1.0f));
 
 		assertThat(spectra.size(), equalTo(1));
 
@@ -59,6 +60,7 @@ public class PeakInvestigatorScanExtractingMethodTest {
 		PeakInvestigatorScanExtractingMethod method = new PeakInvestigatorScanExtractingMethod(
 				BASE_TEST_PATH + "two_scans.tar");
 		List<MsSpectrum> spectra = method.execute();
+		assertThat(method.getFinishedPercentage(), equalTo(1.0f));
 
 		assertThat(spectra.size(), equalTo(2));
 
@@ -94,6 +96,7 @@ public class PeakInvestigatorScanExtractingMethodTest {
 		PeakInvestigatorScanExtractingMethod method = new PeakInvestigatorScanExtractingMethod(
 				BASE_TEST_PATH + "one_scan.error.tar");
 		List<MsSpectrum> spectra = method.execute();
+		assertThat(method.getFinishedPercentage(), equalTo(1.0f));
 
 		assertThat(spectra.size(), equalTo(1));
 		assertThat(spectra.get(0), instanceOf(PeakInvestigatorMsSpectrum.class));
@@ -129,6 +132,7 @@ public class PeakInvestigatorScanExtractingMethodTest {
 		PeakInvestigatorScanExtractingMethod method = new PeakInvestigatorScanExtractingMethod(
 				BASE_TEST_PATH + "two_scans.error.tar");
 		List<MsSpectrum> spectra = method.execute();
+		assertThat(method.getFinishedPercentage(), equalTo(1.0f));
 
 		assertThat(spectra.size(), equalTo(2));
 		assertThat(spectra.get(0), instanceOf(PeakInvestigatorMsSpectrum.class));
